@@ -5,6 +5,7 @@ namespace App\Controller;
 use App\Entity\Search;
 use App\Enum\FormatType;
 use App\Form\OmniSearchType;
+use App\Service\DoiHelper;
 use App\Service\ExternalSearch;
 use App\Service\FavouriteService;
 use App\Service\MarkupReference;
@@ -84,6 +85,7 @@ class SearchController extends AbstractController
             $query = $search->getQuery();
 
             if ($search->getCheckExternal()) {
+                // User explicitly requested external search
                 $externalResult = $externalSearch->search($query);
 
                 if (!empty($externalResult)) {
@@ -96,7 +98,24 @@ class SearchController extends AbstractController
                     };
                 }
             } else {
+                // Internal search
                 $results = $searchService->search($query);
+
+                // If the query is a DOI and no internal results found,
+                // automatically fall back to external search
+                if (empty($results) && DoiHelper::isDoiSearch($query)) {
+                    $externalResult = $externalSearch->search($query);
+
+                    if (!empty($externalResult)) {
+                        $formatter = new MarkupReference();
+                        $externalResult["reference"] = match ($search->getFormatType()){
+                            FormatType::Text => $externalResult["reference"],
+                            FormatType::BibTex => $externalSearch->getBibTex($externalResult["doi"]),
+                            FormatType::BibItem => $formatter->latex($externalResult["reference"], $externalResult["abbreviation"]),
+                            FormatType::Word => $formatter->word($externalResult["reference"], $externalResult["abbreviation"]),
+                        };
+                    }
+                }
             }
         }
 
