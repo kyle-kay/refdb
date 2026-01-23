@@ -18,11 +18,7 @@ class ExternalSearch
 
     private function extractDoi($referenceText): ?string
     {
-        preg_match('#10.\d{4,9}/[-._;()/:a-zA-Z0-9]+#i', $referenceText, $matches);
-        if (empty($matches)) {
-            return null;
-        }
-        return rtrim($matches[0], ".");
+        return DoiHelper::extractDoi($referenceText);
     }
 
     private function extractEventName($doiResult): ?string
@@ -127,11 +123,12 @@ class ExternalSearch
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         $result = curl_exec($ch);
+        $error = curl_errno($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        if (curl_errno($ch)) {
+        if ($error) {
             return null;
         }
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if ($http_code != 200) {
             return null;
         }
@@ -159,11 +156,12 @@ class ExternalSearch
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         $rawResult = curl_exec($ch);
+        $error = curl_errno($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         curl_close($ch);
-        if (curl_errno($ch)) {
+        if ($error) {
             return null;
         }
-        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
         if ($http_code != 200) {
             return null;
         }
@@ -207,8 +205,9 @@ class ExternalSearch
         curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
         curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
         $result = curl_exec($ch);
+        $error = curl_errno($ch);
         curl_close($ch);
-        if (curl_errno($ch)) {
+        if ($error) {
             return null;
         }
 

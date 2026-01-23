@@ -5,6 +5,7 @@ namespace App\Service;
 use App\Entity\Author;
 use App\Entity\Conference;
 use App\Entity\Reference;
+use App\Service\DoiHelper;
 use Doctrine\ORM\EntityManagerInterface;
 use Exception;
 use MongoDB\Driver\ReadPreference;
@@ -97,8 +98,57 @@ class SearchService
         }
     }
 
+    /**
+     * Check if the query appears to be a DOI.
+     */
+    public function isDoiQuery(?string $query): bool
+    {
+        return DoiHelper::isDoiSearch($query);
+    }
+
+    /**
+     * Search for references by DOI specifically.
+     * Returns matching references if the DOI is found in the database.
+     */
+    public function searchByDoi(string $doi): array
+    {
+        // Normalize the DOI
+        $normalizedDoi = DoiHelper::extractDoi($doi);
+        if ($normalizedDoi === null) {
+            return [];
+        }
+
+        // Search MongoDB by DOI field specifically
+        $cursor = $this->getCollection()->find(['doi' => $normalizedDoi]);
+        $ids = [];
+        foreach ($cursor as $document) {
+            $ids[] = $document->ref_id;
+        }
+
+        if (empty($ids)) {
+            return [];
+        }
+
+        return $this->manager->getRepository(Reference::class)->createQueryBuilder("r")
+            ->where("r.id IN (:ids)")
+            ->setParameter("ids", $ids)
+            ->getQuery()
+            ->getResult();
+    }
+
     public function search(?string $query = null, int $limitResults = 10): array
     {
+        // Check if this is a DOI query - if so, search DOI field first
+        if (DoiHelper::isDoiSearch($query)) {
+            $doiResults = $this->searchByDoi($query);
+            if (!empty($doiResults)) {
+                return $doiResults;
+            }
+            // If no DOI match found in internal DB, return empty
+            // The controller will handle fallback to external search
+            return [];
+        }
+
         $pipeline = [
             ['$search' => [
                 'index' => 'search',
@@ -116,6 +166,10 @@ class SearchService
             if (count($results) > $limitResults) {
                 break;
             }
+        }
+
+        if (empty($ids)) {
+            return [];
         }
 
         $references = $this->manager->getRepository(Reference::class)->createQueryBuilder("r")
