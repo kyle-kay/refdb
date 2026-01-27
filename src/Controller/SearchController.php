@@ -22,6 +22,22 @@ use Twig\Environment;
 class SearchController extends AbstractController
 {
 
+    private function formatExternalResult(array $externalResult, FormatType $formatType, ExternalSearch $externalSearch): array
+    {
+        $formatter = new MarkupReference();
+        $type = $externalResult["type"] ?? null;
+        $title = $externalResult["title"] ?? null;
+
+        $externalResult["reference"] = match ($formatType){
+            FormatType::Text => $externalResult["reference"],
+            FormatType::BibTex => $externalSearch->getBibTex($externalResult["doi"]),
+            FormatType::BibItem => $formatter->latex($externalResult["reference"], $externalResult["abbreviation"], $type, $title),
+            FormatType::Word => $formatter->word($externalResult["reference"], $externalResult["abbreviation"], $type, $title),
+        };
+
+        return $externalResult;
+    }
+
     /**
      * @Route("/external/{format}", name="external-query", defaults={"format": "text"})
      * @param Request $request
@@ -33,13 +49,7 @@ class SearchController extends AbstractController
         $externalResult = $externalSearch->search($query);
 
         if (!empty($externalResult)) {
-            $formatter = new MarkupReference();
-            $externalResult["reference"] = match (FormatType::from($format)){
-                FormatType::Text => $externalResult["reference"],
-                FormatType::BibTex => $externalSearch->getBibTex($externalResult["doi"]),
-                FormatType::BibItem => $formatter->latex($externalResult["reference"], $externalResult["abbreviation"]),
-                FormatType::Word => $formatter->word($externalResult["reference"], $externalResult["abbreviation"]),
-            };
+            $externalResult = $this->formatExternalResult($externalResult, FormatType::from($format), $externalSearch);
         }
 
         return new JsonResponse(['query'=>$externalResult]);
@@ -89,13 +99,7 @@ class SearchController extends AbstractController
                 $externalResult = $externalSearch->search($query);
 
                 if (!empty($externalResult)) {
-                    $formatter = new MarkupReference();
-                    $externalResult["reference"] = match ($search->getFormatType()){
-                        FormatType::Text => $externalResult["reference"],
-                        FormatType::BibTex => $externalSearch->getBibTex($externalResult["doi"]),
-                        FormatType::BibItem => $formatter->latex($externalResult["reference"], $externalResult["abbreviation"]),
-                        FormatType::Word => $formatter->word($externalResult["reference"], $externalResult["abbreviation"]),
-                    };
+                    $externalResult = $this->formatExternalResult($externalResult, $search->getFormatType(), $externalSearch);
                 }
             } else {
                 // Internal search
@@ -107,13 +111,7 @@ class SearchController extends AbstractController
                     $externalResult = $externalSearch->search($query);
 
                     if (!empty($externalResult)) {
-                        $formatter = new MarkupReference();
-                        $externalResult["reference"] = match ($search->getFormatType()){
-                            FormatType::Text => $externalResult["reference"],
-                            FormatType::BibTex => $externalSearch->getBibTex($externalResult["doi"]),
-                            FormatType::BibItem => $formatter->latex($externalResult["reference"], $externalResult["abbreviation"]),
-                            FormatType::Word => $formatter->word($externalResult["reference"], $externalResult["abbreviation"]),
-                        };
+                        $externalResult = $this->formatExternalResult($externalResult, $search->getFormatType(), $externalSearch);
                     }
                 }
             }
