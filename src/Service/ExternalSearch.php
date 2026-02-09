@@ -47,6 +47,19 @@ class ExternalSearch
         return null;
     }
 
+    private function extractPublisherLocation($doiResult): ?string
+    {
+        $locationKey = "publisher-location";
+        if (isset($doiResult->$locationKey)) {
+            return $doiResult->$locationKey;
+        }
+        $placeKey = "publisher-place";
+        if (isset($doiResult->$placeKey)) {
+            return $doiResult->$placeKey;
+        }
+        return null;
+    }
+
     private function extractJournalName($doiResult): ?string
     {
         $journalKey = "short-container-title";
@@ -91,8 +104,10 @@ class ExternalSearch
         }
 
         $publisher = $this->extractPublisher($firstResult);
+        $publisherLocation = $this->extractPublisherLocation($firstResult);
         $journalName = $this->extractJournalName($firstResult);
         $eventName = $this->extractEventName($firstResult);
+        $title = isset($firstResult->title) ? (is_array($firstResult->title) ? ($firstResult->title[0] ?? null) : $firstResult->title) : null;
 
         $lookupMeta = new LookupMeta();
         $lookupMeta->setDoi($firstResult->DOI);
@@ -107,8 +122,10 @@ class ExternalSearch
             "doi" => $firstResult->DOI,
             "type" => $firstResult->type,
             "publisher" => $publisher,
+            "publisherLocation" => $publisherLocation,
             "journalName" => $journalName,
             "eventName" => $eventName,
+            "title" => $title,
         ];
     }
 
@@ -168,8 +185,10 @@ class ExternalSearch
 
         $result = json_decode($rawResult);
         $publisher = $this->extractPublisher($result);
+        $publisherLocation = $this->extractPublisherLocation($result);
         $journalName = $this->extractJournalName($result);
         $eventName = $this->extractEventName($result);
+        $title = isset($result->title) ? (is_array($result->title) ? ($result->title[0] ?? null) : $result->title) : null;
 
         $lookupMeta = new LookupMeta();
         $lookupMeta->setDoi($doi);
@@ -184,8 +203,10 @@ class ExternalSearch
         return [
             "type" => $result->type,
             "publisher" => $publisher,
+            "publisherLocation" => $publisherLocation,
             "journalName" => $journalName,
             "eventName" => $eventName,
+            "title" => $title,
         ];
     }
 
@@ -246,7 +267,9 @@ class ExternalSearch
                 $journalAbbreviation = $this->lookupAbbreviation($journalName);
             }
         } else {
-            $journalAbbreviation = $matches[1][0];
+            // UBC API returns pairs: [full_name, abbreviation, full_name, abbreviation, ...]
+            // Validate that the result actually matches our journal before using it.
+            $journalAbbreviation = $this->findMatchingAbbreviation($journalName, $matches[1]);
         }
 
         if (empty($journalAbbreviation)) {
@@ -261,6 +284,54 @@ class ExternalSearch
         $this->manager->flush();
 
         return $journalAbbreviation;
+    }
+
+    /**
+     * Find a matching abbreviation from UBC API results by validating
+     * the full journal name matches the input.
+     *
+     * UBC returns HTML table rows with pairs: [full_name, abbreviation].
+     * We check each full name against the input to avoid false matches
+     * (e.g., "Science" matching "AIMS Medical Science").
+     */
+    private function findMatchingAbbreviation(string $journalName, array $tdValues): ?string
+    {
+        $normalizedInput = strtolower(trim($journalName));
+
+        // Try to match in pairs (full_name, abbreviation)
+        for ($i = 0; $i + 1 < count($tdValues); $i += 2) {
+            $fullName = strtolower(trim($tdValues[$i]));
+            $abbreviation = trim($tdValues[$i + 1]);
+
+            if ($fullName === $normalizedInput) {
+                return $abbreviation;
+            }
+        }
+
+        // Also try reversed pairs (abbreviation, full_name) in case column order differs
+        for ($i = 0; $i + 1 < count($tdValues); $i += 2) {
+            $fullName = strtolower(trim($tdValues[$i + 1]));
+            $abbreviation = trim($tdValues[$i]);
+
+            if ($fullName === $normalizedInput) {
+                return $abbreviation;
+            }
+        }
+
+        // If no exact match, try case-insensitive contains match
+        // but only if the full name starts with the input
+        // This handles cases like "Science" matching "Science (New York, N.Y.)"
+        for ($i = 0; $i + 1 < count($tdValues); $i += 2) {
+            $fullName = strtolower(trim($tdValues[$i]));
+            $abbreviation = trim($tdValues[$i + 1]);
+
+            if (str_starts_with($fullName, $normalizedInput)) {
+                return $abbreviation;
+            }
+        }
+
+        // No validated match found - return null rather than a wrong abbreviation
+        return null;
     }
 
     private function abbreviateJournal($originalReference, $journalName): ?array
@@ -318,7 +389,9 @@ class ExternalSearch
                 "type" => $meta['type'],
                 "journalName" => $meta['journalName'],
                 "publisher" => $meta['publisher'],
+                "publisherLocation" => $meta['publisherLocation'] ?? null,
                 "eventName" => $meta['eventName'],
+                "title" => $meta['title'] ?? null,
                 "doi" => $doi
             ];
         }
@@ -335,22 +408,34 @@ class ExternalSearch
         }
 
         $abbreviation = null;
+        $type = $result['type'];
 
-        if ($result['type'] == "journal-article") {
-            $result = $this->abbreviateJournal($reference, $result['journalName']);
-            $reference = $result["reference"];
-            $abbreviation = $result["abbreviation"];
-        } elseif ($result['type'] == "proceedings-article" && $result['eventName'] !== null) {
+        if ($type == "journal-article") {
+            $abbrevResult = $this->abbreviateJournal($reference, $result['journalName']);
+            $reference = $abbrevResult["reference"];
+            $abbreviation = $abbrevResult["abbreviation"];
+        } elseif ($type == "proceedings-article" && $result['eventName'] !== null) {
             $result['eventName'] = str_replace("Proceedings of the ", "Proc. ", $result['eventName']);
             $result['eventName'] = str_replace(" International ", " Int. ", $result['eventName']);
             $result['eventName'] = str_replace(" Conference ", " Conf. ", $result['eventName']);
             $reference = str_replace($result['journalName'], $result['eventName'], $reference);
             $abbreviation = $result['eventName'];
+        } elseif (in_array($type, ["book", "monograph", "edited-book", "book-chapter", "reference-book"])) {
+            // For books: add publisher location if available and not already present
+            if ($result['publisherLocation'] !== null && !str_contains($reference, $result['publisherLocation'])) {
+                // Insert location before publisher name in the reference
+                if ($result['publisher'] !== null && str_contains($reference, $result['publisher'])) {
+                    $reference = str_replace($result['publisher'], $result['publisherLocation'] . ": " . $result['publisher'], $reference);
+                }
+            }
         }
+        // dissertation, report, and other types pass through with IEEE formatting as-is
 
         return [
             "reference" => $this->adjustIeeeStyling($reference),
             "doi" => $doi,
+            "type" => $type,
+            "title" => $result['title'] ?? null,
             "journalName" => $result['journalName'] ?? "",
             "abbreviation" => $abbreviation,
         ];
