@@ -4,6 +4,95 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased] - 2026-01-23
 
+### Bug Fixes from User Group Feedback
+
+Based on feedback from the JACoW user group about formatting issues with the reference tool:
+
+#### Bug #1: Journal Abbreviation Returns Wrong Journal (CRITICAL)
+**Problem:** Searching for `doi:10.1126/science.abo4297` returned "AIMS Med. Sci." instead of "Science"
+
+**Root Cause:** `lookupAbbreviation()` blindly took the first result from UBC Journal Abbreviations API fuzzy search. For common short names like "Science", the API returned multiple journals containing "science" in their name.
+
+**Fix:** Added `findMatchingAbbreviation()` in `src/Service/ExternalSearch.php`:
+- Validates that the returned full journal name matches the input
+- Tries exact match first, then reversed column order, then prefix match
+- Returns `null` (no abbreviation) rather than a wrong abbreviation
+
+#### Bug #2: Thesis DOI Returns "No Results"
+**Problem:** Valid thesis DOIs like `doi:10.3929/ethz-a-010748643` returned no results
+
+**Root Cause:** The `search()` method only had explicit handling for `journal-article` and `proceedings-article` types. Other types like `dissertation` fell through without proper handling.
+
+**Fix:** Updated `src/Service/ExternalSearch.php`:
+- `dissertation`, `report`, and other types now pass through with IEEE formatting
+- No longer blocked by missing type handling
+
+#### Bug #3: Book Formatting Incomplete
+**Problem:** Book DOI `doi:10.1007/978-3-319-18317-6` was missing italicized title and publisher address
+
+**Root Cause:**
+- Book titles weren't being italicized (only journal names were)
+- Publisher location (`publisher-location`) wasn't being extracted from DOI.org metadata
+
+**Fix:**
+- Added `extractPublisherLocation()` in `src/Service/ExternalSearch.php`
+- Book types (`book`, `monograph`, `edited-book`, `book-chapter`, `reference-book`) now insert location before publisher
+- Updated `src/Service/MarkupReference.php` to accept `type` and `title` parameters
+- Book titles are now italicized in LaTeX (`\textit{}`) and Word (`<em>`) output
+- Refactored `src/Controller/SearchController.php` with `formatExternalResult()` helper
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/Service/ExternalSearch.php` | Added `findMatchingAbbreviation()`, `extractPublisherLocation()`, book/thesis type handling |
+| `src/Service/MarkupReference.php` | Added `type`/`title` params, `isBookType()` for title italicization |
+| `src/Controller/SearchController.php` | Refactored with `formatExternalResult()` helper |
+
+---
+
+## Pending Features (from IPAC27 Feature Request)
+
+The following items from `ling_feature_request_01_23_2026.md` are **not yet implemented**:
+
+### High Priority - Not Started
+| Feature | Status | Notes |
+|---------|--------|-------|
+| arXiv preprints | ❌ Not implemented | Requires arXiv API integration |
+| Reports | ❌ Not implemented | Requires template-based formatting |
+| Manuals | ❌ Not implemented | Requires template-based formatting |
+| External conferences/workshops | ⚠️ Partial | Metadata extraction improved, but not fully JACoW-compliant |
+
+### Medium Priority - Not Started
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Online materials | ❌ Not implemented | Requires URL metadata extraction |
+
+### Low Priority - Not Started
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Submitted journal papers | ❌ Not implemented | Template only ("to be published") |
+| Patents | ❌ Not implemented | No good free API available |
+
+### Completed from Feature Request
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Journal abbreviation accuracy | ✅ Fixed | Validates UBC API results |
+| Thesis formatting | ✅ Fixed | DOIs now resolve correctly |
+| Book formatting | ✅ Fixed | Title italics + publisher location |
+
+### Next Steps for Full IPAC27 Compliance
+1. Implement `ReferenceTypeDetector` to detect arXiv IDs, ISBNs, etc.
+2. Create `ArxivSearch` service for arXiv API integration
+3. Add template-based formatting for reports, manuals, online materials
+4. Consider AI-assisted parsing for unstructured reference text (with 98% accuracy requirement)
+
+See `FEATURE_REVIEW_IPAC27.md` for detailed implementation plan.
+
+---
+
+## [Earlier] - 2026-01-23
+
 ### Problem Description
 
 Users reported that searching for DOIs without checking "Search for external reference" returned incorrect results. For example:
