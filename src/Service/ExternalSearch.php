@@ -23,20 +23,147 @@ class ExternalSearch
 
     private function extractEventName($doiResult): ?string
     {
-        if ($doiResult->type == "proceedings-article" && isset($doiResult->event)) {
-            if (is_string($doiResult->event) && $doiResult->event != "") {
-                return $doiResult->event;
-            }
-
-            if (isset($doiResult->event->acronym)) {
-                if (isset($doiResult->event->location)) {
-                    return "Proc. " . $doiResult->event->acronym . ", " . $doiResult->event->location;
+        // Handle proceedings-article type
+        if (isset($doiResult->type) && $doiResult->type == "proceedings-article") {
+            // Try event object first
+            if (isset($doiResult->event)) {
+                if (is_string($doiResult->event) && $doiResult->event != "") {
+                    return $doiResult->event;
                 }
-                return "Proc. " . $doiResult->event->acronym;
+
+                if (is_object($doiResult->event)) {
+                    $eventParts = [];
+
+                    // Get event name or acronym
+                    if (isset($doiResult->event->name) && $doiResult->event->name != "") {
+                        $eventParts[] = $doiResult->event->name;
+                    } elseif (isset($doiResult->event->acronym) && $doiResult->event->acronym != "") {
+                        $eventParts[] = $doiResult->event->acronym;
+                    }
+
+                    // Get location
+                    if (isset($doiResult->event->location) && $doiResult->event->location != "") {
+                        $eventParts[] = $doiResult->event->location;
+                    }
+
+                    if (!empty($eventParts)) {
+                        return implode(", ", $eventParts);
+                    }
+                }
             }
 
+            // Fallback: use container-title for proceedings if no event info
+            $containerKey = "container-title";
+            if (isset($doiResult->$containerKey)) {
+                if (is_string($doiResult->$containerKey) && $doiResult->$containerKey != "") {
+                    return $doiResult->$containerKey;
+                }
+                if (is_array($doiResult->$containerKey) && count($doiResult->$containerKey) > 0) {
+                    return $doiResult->$containerKey[0];
+                }
+            }
         }
         return null;
+    }
+
+    private function extractEventDate($doiResult): ?string
+    {
+        // Try to get event start date
+        if (isset($doiResult->event) && is_object($doiResult->event)) {
+            if (isset($doiResult->event->start)) {
+                $start = $doiResult->event->start;
+                // Handle date-parts format: [[year, month, day]]
+                if (isset($start->{'date-parts'}) && is_array($start->{'date-parts'})) {
+                    $dateParts = $start->{'date-parts'}[0] ?? [];
+                    return $this->formatDateParts($dateParts);
+                }
+            }
+        }
+
+        // Fallback to issued date
+        if (isset($doiResult->issued) && isset($doiResult->issued->{'date-parts'})) {
+            $dateParts = $doiResult->issued->{'date-parts'}[0] ?? [];
+            return $this->formatDateParts($dateParts);
+        }
+
+        return null;
+    }
+
+    private function formatDateParts(array $dateParts): ?string
+    {
+        if (empty($dateParts)) {
+            return null;
+        }
+
+        $year = $dateParts[0] ?? null;
+        $month = $dateParts[1] ?? null;
+
+        if ($year === null) {
+            return null;
+        }
+
+        if ($month !== null) {
+            $monthNames = [
+                1 => 'Jan.', 2 => 'Feb.', 3 => 'Mar.', 4 => 'Apr.',
+                5 => 'May', 6 => 'Jun.', 7 => 'Jul.', 8 => 'Aug.',
+                9 => 'Sep.', 10 => 'Oct.', 11 => 'Nov.', 12 => 'Dec.'
+            ];
+            $monthStr = $monthNames[$month] ?? '';
+            return trim("$monthStr $year");
+        }
+
+        return (string) $year;
+    }
+
+    private function extractEventLocation($doiResult): ?string
+    {
+        if (isset($doiResult->event) && is_object($doiResult->event)) {
+            if (isset($doiResult->event->location) && $doiResult->event->location != "") {
+                return $doiResult->event->location;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Apply standard conference/proceedings abbreviations.
+     */
+    private function abbreviateConferenceName(string $name): string
+    {
+        $abbreviations = [
+            'Proceedings of the ' => 'Proc. ',
+            'Proceedings of ' => 'Proc. ',
+            ' International ' => ' Int. ',
+            ' Conference ' => ' Conf. ',
+            ' Workshop ' => ' WS ',
+            ' Symposium ' => ' Symp. ',
+            ' Meeting ' => ' Meet. ',
+            ' Congress ' => ' Congr. ',
+            ' Convention ' => ' Conv. ',
+            ' Colloquium ' => ' Colloq. ',
+            ' Annual ' => ' Annu. ',
+            ' European ' => ' Eur. ',
+            ' American ' => ' Amer. ',
+            ' National ' => ' Nat. ',
+            ' Society ' => ' Soc. ',
+            ' Institute ' => ' Inst. ',
+            ' Association ' => ' Assoc. ',
+            ' Technology ' => ' Technol. ',
+            ' Engineering ' => ' Eng. ',
+            ' Science ' => ' Sci. ',
+            ' Physics ' => ' Phys. ',
+            ' Applied ' => ' Appl. ',
+            ' Nuclear ' => ' Nucl. ',
+            ' Particle ' => ' Part. ',
+            ' Accelerator ' => ' Accel. ',
+            ' Linear ' => ' Lin. ',
+        ];
+
+        foreach ($abbreviations as $full => $abbrev) {
+            $name = str_replace($full, $abbrev, $name);
+        }
+
+        return $name;
     }
 
     private function extractPublisher($doiResult): ?string
@@ -107,6 +234,8 @@ class ExternalSearch
         $publisherLocation = $this->extractPublisherLocation($firstResult);
         $journalName = $this->extractJournalName($firstResult);
         $eventName = $this->extractEventName($firstResult);
+        $eventDate = $this->extractEventDate($firstResult);
+        $eventLocation = $this->extractEventLocation($firstResult);
         $title = isset($firstResult->title) ? (is_array($firstResult->title) ? ($firstResult->title[0] ?? null) : $firstResult->title) : null;
 
         $lookupMeta = new LookupMeta();
@@ -125,6 +254,8 @@ class ExternalSearch
             "publisherLocation" => $publisherLocation,
             "journalName" => $journalName,
             "eventName" => $eventName,
+            "eventDate" => $eventDate,
+            "eventLocation" => $eventLocation,
             "title" => $title,
         ];
     }
@@ -188,6 +319,8 @@ class ExternalSearch
         $publisherLocation = $this->extractPublisherLocation($result);
         $journalName = $this->extractJournalName($result);
         $eventName = $this->extractEventName($result);
+        $eventDate = $this->extractEventDate($result);
+        $eventLocation = $this->extractEventLocation($result);
         $title = isset($result->title) ? (is_array($result->title) ? ($result->title[0] ?? null) : $result->title) : null;
 
         $lookupMeta = new LookupMeta();
@@ -206,6 +339,8 @@ class ExternalSearch
             "publisherLocation" => $publisherLocation,
             "journalName" => $journalName,
             "eventName" => $eventName,
+            "eventDate" => $eventDate,
+            "eventLocation" => $eventLocation,
             "title" => $title,
         ];
     }
@@ -391,6 +526,8 @@ class ExternalSearch
                 "publisher" => $meta['publisher'],
                 "publisherLocation" => $meta['publisherLocation'] ?? null,
                 "eventName" => $meta['eventName'],
+                "eventDate" => $meta['eventDate'] ?? null,
+                "eventLocation" => $meta['eventLocation'] ?? null,
                 "title" => $meta['title'] ?? null,
                 "doi" => $doi
             ];
@@ -414,12 +551,26 @@ class ExternalSearch
             $abbrevResult = $this->abbreviateJournal($reference, $result['journalName']);
             $reference = $abbrevResult["reference"];
             $abbreviation = $abbrevResult["abbreviation"];
-        } elseif ($type == "proceedings-article" && $result['eventName'] !== null) {
-            $result['eventName'] = str_replace("Proceedings of the ", "Proc. ", $result['eventName']);
-            $result['eventName'] = str_replace(" International ", " Int. ", $result['eventName']);
-            $result['eventName'] = str_replace(" Conference ", " Conf. ", $result['eventName']);
-            $reference = str_replace($result['journalName'], $result['eventName'], $reference);
-            $abbreviation = $result['eventName'];
+        } elseif ($type == "proceedings-article") {
+            // Get the event/conference name, with fallback to journalName (container-title)
+            $confName = $result['eventName'] ?? $result['journalName'] ?? null;
+
+            if ($confName !== null) {
+                // Apply conference abbreviations
+                $abbreviatedConf = $this->abbreviateConferenceName($confName);
+
+                // Add "Proc." prefix if not already present
+                if (!str_starts_with($abbreviatedConf, "Proc.") && !str_starts_with($abbreviatedConf, "Proc ")) {
+                    $abbreviatedConf = "Proc. " . $abbreviatedConf;
+                }
+
+                // Replace the original container name in the reference
+                if ($result['journalName'] !== null && $result['journalName'] !== "") {
+                    $reference = str_replace($result['journalName'], $abbreviatedConf, $reference);
+                }
+
+                $abbreviation = $abbreviatedConf;
+            }
         } elseif (in_array($type, ["book", "monograph", "edited-book", "book-chapter", "reference-book"])) {
             // For books: add publisher location if available and not already present
             if ($result['publisherLocation'] !== null && !str_contains($reference, $result['publisherLocation'])) {
