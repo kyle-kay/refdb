@@ -2,7 +2,50 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased] - 2026-01-23
+## [Unreleased] - 2026-02-10
+
+### New Feature: arXiv Preprint Support
+
+Added full support for arXiv preprints, a high-priority item from the IPAC27 feature request.
+
+#### Features
+
+- **Auto-detection of arXiv IDs**: Searches containing arXiv IDs are automatically routed to the arXiv API
+- **Multiple input formats supported**:
+  - Plain ID: `2301.12345` or `hep-th/9901001`
+  - With prefix: `arXiv:2301.12345`
+  - URL: `https://arxiv.org/abs/2301.12345`
+  - PDF URL: `https://arxiv.org/pdf/2301.12345.pdf`
+- **JACoW-compliant formatting**: References formatted as `Author(s), "Title," arXiv:XXXX.XXXXX [category], year.`
+- **BibTeX export**: Full BibTeX support with proper arXiv fields (`eprint`, `archivePrefix`, `primaryClass`)
+- **Caching**: Results cached in database for faster subsequent lookups
+
+#### New Files
+
+| File | Description |
+|------|-------------|
+| `src/Service/ArxivHelper.php` | arXiv ID detection, extraction, and normalization |
+| `src/Service/ArxivSearch.php` | arXiv API integration and reference formatting |
+| `src/Entity/ArxivLookup.php` | Entity for caching arXiv lookup results |
+
+#### Modified Files
+
+| File | Change |
+|------|--------|
+| `src/Controller/SearchController.php` | Added arXiv auto-detection and routing |
+
+#### Usage Examples
+
+| Input | Result |
+|-------|--------|
+| `2301.12345` | Fetches arXiv paper and formats reference |
+| `arXiv:2301.12345` | Same as above |
+| `https://arxiv.org/abs/2301.12345` | Same as above |
+| `hep-th/9901001` | Old-style arXiv ID also supported |
+
+---
+
+## [2026-01-23] - Bug Fixes
 
 ### Bug Fixes from User Group Feedback
 
@@ -53,22 +96,22 @@ Based on feedback from the JACoW user group about formatting issues with the ref
 
 ## Pending Features (from IPAC27 Feature Request)
 
-The following items from `ling_feature_request_01_23_2026.md` are **not yet implemented**:
+The following items from `ling_feature_request_01_23_2026.md` are tracked below:
 
-### High Priority - Not Started
+### High Priority
 | Feature | Status | Notes |
 |---------|--------|-------|
-| arXiv preprints | ❌ Not implemented | Requires arXiv API integration |
+| arXiv preprints | ✅ Completed | Full arXiv API integration with JACoW formatting |
 | Reports | ❌ Not implemented | Requires template-based formatting |
 | Manuals | ❌ Not implemented | Requires template-based formatting |
-| External conferences/workshops | ⚠️ Partial | Metadata extraction improved, but not fully JACoW-compliant |
+| External conferences/workshops | ⚠️ Partial | Metadata extraction improved, abbreviations added |
 
-### Medium Priority - Not Started
+### Medium Priority
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Online materials | ❌ Not implemented | Requires URL metadata extraction |
 
-### Low Priority - Not Started
+### Low Priority
 | Feature | Status | Notes |
 |---------|--------|-------|
 | Submitted journal papers | ❌ Not implemented | Template only ("to be published") |
@@ -77,15 +120,15 @@ The following items from `ling_feature_request_01_23_2026.md` are **not yet impl
 ### Completed from Feature Request
 | Feature | Status | Notes |
 |---------|--------|-------|
+| arXiv preprints | ✅ Completed | ArxivHelper + ArxivSearch services |
 | Journal abbreviation accuracy | ✅ Fixed | Validates UBC API results |
 | Thesis formatting | ✅ Fixed | DOIs now resolve correctly |
 | Book formatting | ✅ Fixed | Title italics + publisher location |
 
 ### Next Steps for Full IPAC27 Compliance
-1. Implement `ReferenceTypeDetector` to detect arXiv IDs, ISBNs, etc.
-2. Create `ArxivSearch` service for arXiv API integration
-3. Add template-based formatting for reports, manuals, online materials
-4. Consider AI-assisted parsing for unstructured reference text (with 98% accuracy requirement)
+1. Add template-based formatting for reports and manuals
+2. Implement URL metadata extraction for online materials
+3. Consider AI-assisted parsing for unstructured reference text (with 98% accuracy requirement)
 
 See `FEATURE_REVIEW_IPAC27.md` for detailed implementation plan.
 

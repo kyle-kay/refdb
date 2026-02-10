@@ -5,6 +5,8 @@ namespace App\Controller;
 use App\Entity\Search;
 use App\Enum\FormatType;
 use App\Form\OmniSearchType;
+use App\Service\ArxivHelper;
+use App\Service\ArxivSearch;
 use App\Service\DoiHelper;
 use App\Service\ExternalSearch;
 use App\Service\FavouriteService;
@@ -22,15 +24,18 @@ use Twig\Environment;
 class SearchController extends AbstractController
 {
 
-    private function formatExternalResult(array $externalResult, FormatType $formatType, ExternalSearch $externalSearch): array
+    private function formatExternalResult(array $externalResult, FormatType $formatType, ExternalSearch $externalSearch, ?ArxivSearch $arxivSearch = null): array
     {
         $formatter = new MarkupReference();
         $type = $externalResult["type"] ?? null;
         $title = $externalResult["title"] ?? null;
+        $isArxiv = ($type === 'arxiv-preprint');
 
         $externalResult["reference"] = match ($formatType){
             FormatType::Text => $externalResult["reference"],
-            FormatType::BibTex => $externalSearch->getBibTex($externalResult["doi"]),
+            FormatType::BibTex => $isArxiv && $arxivSearch
+                ? $arxivSearch->getBibTex($externalResult["arxivId"])
+                : $externalSearch->getBibTex($externalResult["doi"]),
             FormatType::BibItem => $formatter->latex($externalResult["reference"], $externalResult["abbreviation"], $type, $title),
             FormatType::Word => $formatter->word($externalResult["reference"], $externalResult["abbreviation"], $type, $title),
         };
@@ -43,13 +48,19 @@ class SearchController extends AbstractController
      * @param Request $request
      * @return JsonResponse
      */
-    public function externalAction(Request $request, ExternalSearch $externalSearch, ?string $format = "text")
+    public function externalAction(Request $request, ExternalSearch $externalSearch, ArxivSearch $arxivSearch, ?string $format = "text")
     {
         $query = $request->get('query');
-        $externalResult = $externalSearch->search($query);
+
+        // Check if it's an arXiv query first
+        if (ArxivHelper::isArxivSearch($query)) {
+            $externalResult = $arxivSearch->search($query);
+        } else {
+            $externalResult = $externalSearch->search($query);
+        }
 
         if (!empty($externalResult)) {
-            $externalResult = $this->formatExternalResult($externalResult, FormatType::from($format), $externalSearch);
+            $externalResult = $this->formatExternalResult($externalResult, FormatType::from($format), $externalSearch, $arxivSearch);
         }
 
         return new JsonResponse(['query'=>$externalResult]);
@@ -80,7 +91,7 @@ class SearchController extends AbstractController
      * @param Request $request
      * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function indexAction(Request $request, SearchService $searchService, ExternalSearch $externalSearch, FavouriteService $favouriteService)
+    public function indexAction(Request $request, SearchService $searchService, ExternalSearch $externalSearch, ArxivSearch $arxivSearch, FavouriteService $favouriteService)
     {
         $search = new Search();
         $form = $this->createForm(OmniSearchType::class, $search);
@@ -94,12 +105,22 @@ class SearchController extends AbstractController
             $searched = true;
             $query = $search->getQuery();
 
-            if ($search->getCheckExternal()) {
+            // Check if it's an arXiv query - these always go to arXiv API
+            $isArxivQuery = ArxivHelper::isArxivSearch($query);
+
+            if ($isArxivQuery) {
+                // arXiv queries go directly to arXiv API
+                $externalResult = $arxivSearch->search($query);
+
+                if (!empty($externalResult)) {
+                    $externalResult = $this->formatExternalResult($externalResult, $search->getFormatType(), $externalSearch, $arxivSearch);
+                }
+            } elseif ($search->getCheckExternal()) {
                 // User explicitly requested external search
                 $externalResult = $externalSearch->search($query);
 
                 if (!empty($externalResult)) {
-                    $externalResult = $this->formatExternalResult($externalResult, $search->getFormatType(), $externalSearch);
+                    $externalResult = $this->formatExternalResult($externalResult, $search->getFormatType(), $externalSearch, $arxivSearch);
                 }
             } else {
                 // Internal search
@@ -111,7 +132,7 @@ class SearchController extends AbstractController
                     $externalResult = $externalSearch->search($query);
 
                     if (!empty($externalResult)) {
-                        $externalResult = $this->formatExternalResult($externalResult, $search->getFormatType(), $externalSearch);
+                        $externalResult = $this->formatExternalResult($externalResult, $search->getFormatType(), $externalSearch, $arxivSearch);
                     }
                 }
             }
